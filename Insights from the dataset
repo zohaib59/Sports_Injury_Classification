@@ -1,0 +1,83 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+import os
+
+# Step 0: Set dataset path and load
+dataset_path = "injury_prediction.csv"  # 🔄 Only update this line if switching dataset
+assert os.path.exists(dataset_path), f"Dataset not found: {dataset_path}"
+
+df = pd.read_csv(dataset_path)
+print(f"✅ Loaded dataset '{dataset_path}':", df.shape)
+
+# Step 1: Auto-detect key columns
+id_like_cols = [col for col in df.columns if "id" in col.lower()]
+candidate_targets = [col for col in df.columns if "churn" in col.lower() or "injury" in col.lower()] + df.select_dtypes(include="bool").columns.tolist()
+target_col = candidate_targets[0] if candidate_targets else df.columns[-1]
+print(f"🎯 Target column detected: {target_col}")
+
+numeric_cols = df.select_dtypes(include=["int64", "float64"]).columns.tolist()
+categorical_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+# Step 2: Impute missing values
+for col in categorical_cols:
+    df[col].fillna(df[col].mode()[0], inplace=True)
+for col in numeric_cols:
+    df[col].fillna(df[col].median(), inplace=True)
+
+# Step 3: Drop ID-like and target columns from features
+drop_cols = id_like_cols + [target_col]
+X = df.drop(columns=drop_cols)
+y = df[target_col]
+
+# Step 4: Encode categorical features
+encoder = LabelEncoder()
+for col in X.select_dtypes(include=["object", "category"]).columns:
+    X[col] = encoder.fit_transform(X[col].astype(str))
+
+# Step 5: Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
+
+# Step 6: Train model
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# Step 7: Summary Insights
+print("\n📊 Target Rate (%):")
+print(df[target_col].value_counts(normalize=True).round(3) * 100)
+
+print("\n📉 Target Breakdown by Category:")
+for col in categorical_cols:
+    if col != target_col:
+        target_by_cat = df.groupby(col)[target_col].value_counts(normalize=True).unstack().fillna(0)
+        print(f"\n{col}:\n", (target_by_cat * 100).round(2))
+
+# Step 8: Visualize categorical insights (if columns exist)
+for viz_col in ["ground_condition_rating", "player_position"]:
+    if viz_col in df.columns:
+        pivot = df.groupby(viz_col)[target_col].value_counts(normalize=True).unstack().fillna(0) * 100
+        pivot.plot(kind="bar", stacked=True, figsize=(8, 5), colormap="Set2")
+        plt.title(f"{target_col} Distribution by {viz_col.replace('_', ' ').title()}")
+        plt.ylabel("Percentage (%)")
+        plt.xticks(rotation=0)
+        plt.legend(title=target_col, loc="upper right")
+        plt.tight_layout()
+        plt.show()
+
+# Step 9: Feature Importance
+feature_importance = pd.Series(model.feature_importances_, index=X.columns).sort_values(ascending=False)
+top_features = feature_importance.head(5)
+print("\n🌟 Top 5 Features Influencing Target:\n", top_features)
+
+# Visualize feature importance
+plt.figure(figsize=(8, 5))
+sns.barplot(x=top_features.values, y=top_features.index, palette="mako")
+plt.title(f"Top 5 Features Affecting '{target_col}'")
+plt.xlabel("Importance Score")
+plt.ylabel("Feature")
+plt.tight_layout()
+plt.show()
